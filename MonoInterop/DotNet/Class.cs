@@ -7,6 +7,12 @@ namespace MonoInterop.DotNet;
 using static DLLReader;
 public class Class
 {
+    public enum ConflictOption
+    {
+        None,
+        Original,
+        Secondary
+    }
     public void WriteForward(StringBuilder sb, int indent)
     {
         string pad = new string(' ', indent * 4);
@@ -14,6 +20,10 @@ public class Class
         sb.Append(pad).AppendLine($"class {Name};");
     }
 
+    public string Module()
+    {
+        return Image.Replace('.', '_').Replace('-', '_');
+    }
     public TypeReference AddAndReturn(TypeReference Name)
     {
         foreach (var type in Name.CppID())
@@ -141,6 +151,7 @@ public class Class
     public HashSet<string> ReferencedClasses = new();
     public List<string> GenericParameters = new();
     public bool IsRoot = false;
+    public ConflictOption Conflict;
     public static List<Class> FromType(TypeDefinition type,bool IsRoot, Class? Declaring = null)
     {
         List<Class> List = new();
@@ -192,10 +203,11 @@ public class Class
                 klass.NestedClasses.Add(Nested[0]);
             List.AddRange(Nested);
         }
-        if (ClassMap.ContainsKey(klass.FullName))
+        if (ClassMap.TryGetValue(klass.FullName, out Class Orig))
         {
-            //Console.Error.WriteLine($"Warning: Class {klass.FullName} has conflicts with another! skipping");
-            return List;
+            Orig.Conflict = ConflictOption.Original;
+            klass.Conflict = ConflictOption.Secondary;
+            klass.FullName = klass.Module() + "::" + klass.FullName;
         }
         List.Add(klass);
         ClassMap.Add(klass.FullName, klass);

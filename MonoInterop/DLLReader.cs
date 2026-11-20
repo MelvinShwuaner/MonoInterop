@@ -17,7 +17,8 @@ public class DLLReader
         string open = "";
         foreach (var c in classes)
         {
-            string ns = c.Namespace;
+            string ns = c.Conflict != Class.ConflictOption.Secondary ? c.Namespace :
+                c.Namespace == "" ? c.Module() : c.Module() + "." + c.Namespace;
             if (ns != open)
             {
                 if (open != "") sb.AppendLine("}").AppendLine();
@@ -113,8 +114,12 @@ public class DLLReader
         }
         DLLInfo info = new DLLInfo();
         info.name = "MonoDLLs.h";
+        DefaultAssemblyResolver resolver = new DefaultAssemblyResolver();
+        resolver.AddSearchDirectory(dir.FullName);
+        ReaderParameters Reader = new ReaderParameters() { AssemblyResolver = resolver };
         foreach (FileInfo file in dir.EnumerateFiles())
         {
+          
             if (file.Extension != ".dll")
             {
                 if (file.Extension == ".h") //helper function
@@ -128,7 +133,7 @@ public class DLLReader
             Console.WriteLine($"Processing {msg} {file}");
             try
             {
-                ModuleDefinition asm = ModuleDefinition.ReadModule(file.FullName);
+                ModuleDefinition asm = ModuleDefinition.ReadModule(file.FullName, Reader);
                 ConvertModule(asm, IsRoot);
             }
             catch (Exception e)

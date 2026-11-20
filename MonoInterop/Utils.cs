@@ -84,14 +84,17 @@ public static class Utils
     {
         return Constants.AssemblyMaps.GetValueOrDefault(Name, Name.Replace('.', '_')+ "_dll");
     }
-    public static string ModuleName(this TypeReference t)
+    public static string CheckConflict(this TypeReference t, string ID)
     {
-        switch (t.Scope)
+        if (DLLReader.ClassMap.TryGetValue(ID, out Class klass))
         {
-            case AssemblyNameReference anr: return CheckMaps(anr.Name);        // type from a referenced assembly
-            case ModuleDefinition md:       return md.Assembly.Name.Name.Replace('.', '_') + "_dll";  // type defined in this module
-            default:                        return "undefined";
+            if (klass.Conflict == Class.ConflictOption.Original)
+            {
+                TypeDefinition def = t.Resolve();
+                return def.Module.Name.Replace('.', '_') + "::" + ID;
+            }
         }
+        return "::"+ID;
     }
     public static string[] CppID(this TypeReference t) //no modifiers/ generics/ etc
     {
@@ -128,7 +131,7 @@ public static class Utils
                 return [];
 
             default:
-                return ["::"+t.FullName.ToCPP()]; 
+                return [t.CheckConflict(t.FullName.ToCPP())]; 
         }
     }
     public static string CppName(this TypeReference t)
@@ -165,7 +168,7 @@ public static class Utils
                 return gp.Name;
 
             default:
-                return "::"+t.FullName.ToCPP();      // primitives, flattened names, Namespace::Name
+                return t.CheckConflict(t.FullName.ToCPP());      // primitives, flattened names, Namespace::Name
         }
     }
     public static TypeReference StripGenericArguments(this TypeReference typeRef)

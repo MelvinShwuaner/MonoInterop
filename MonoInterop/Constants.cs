@@ -107,7 +107,21 @@ public static class Constants
 
     public static Dictionary<string, string> AssemblyMaps = new Dictionary<string, string>()
     {
-    //    {"mscorlib", "netstandard"},
+        {"mscorlib.dll", "netstandard_dll"}, 
+        {"System.Core.dll", "netstandard_dll"}, 
+        {"System.dll", "netstandard_dll"}, 
+        {"System.Data.dll", "netstandard_dll"}, 
+        {"System.Data.DataSetExtensions.dll", "netstandard_dll"}, 
+        {"System.Drawing.dll", "netstandard_dll"}, 
+        {"System.IO.Compression.dll", "netstandard_dll"},
+        {"System.IO.Compression.FileSystem.dll", "netstandard_dll"}, 
+        {"System.ComponentModel.Composition.dll", "netstandard_dll"},
+        {"System.Net.Http.dll", "netstandard_dll"}, 
+        {"System.Numerics.dll", "netstandard_dll"}, 
+        {"System.Runtime.Serialization.dll", "netstandard_dll"}, 
+        {"System.Transactions.dll", "netstandard_dll"}, 
+        {"System.Xml.dll", "netstandard_dll"}, 
+        {"System.Xml.Linq.dll", "netstandard_dll"}
     };
     public static HashSet<string> SpecialNames = new HashSet<string>()
     {
