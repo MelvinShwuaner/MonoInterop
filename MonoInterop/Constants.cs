@@ -50,10 +50,10 @@ public static class Constants
     public static string SetStruct = "static constexpr bool IsStruct = true;";
     public static Template PropertyDef = Template.Parse("""
                                                         {{- for p in props ~}}
-                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}{{p.parameters_add}}>{{else}}MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}{{ if p.getter != "" }}&{{ self }}::_pget_{{ p.name }}{{ else }}nullptr{{ end }}, {{ if p.setter != "" }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
                                                         {{ if p.getter != "" }}{{ pad }}static {{ p.type }} _pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{p.args_add}}{{end}}); 
                                                         {{ end }}{{ if p.setter != "" }}{{ pad }}static void _pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v{{p.args_add}}); 
                                                         {{ end }}
+                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}{{p.parameters_add}}>{{else}}inline static MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}{{ if p.getter != "" }}&{{ self }}::_pget_{{ p.name }}{{ else }}nullptr{{ end }}, {{ if p.setter != "" }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
                                                         {{ if p.is_indexer }}{{ pad }}{{ if is_generic }}typename {{ end }}decltype({{ p.name }})::IndexProxy operator[]({{p.args}}); 
                                                         {{ end }}
                                                         {{- end ~}}
@@ -77,9 +77,9 @@ public static class Constants
                                                          {{- end -}}
                                                          """);
     public static Template FieldDef = Template.Parse("""
-                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}>{{else}}MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}&{{ self }}::_pget_{{ p.name }}, {{ if !p.read_only }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
                                                         {{ pad }}static {{ p.type }} _pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{end}}); 
                                                         {{ if !p.read_only}}{{ pad }}static void _pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v); 
+                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}>{{else}}inline static MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}&{{ self }}::_pget_{{ p.name }}, {{ if !p.read_only }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
                                                         {{ end }}
                                                         """);
     public static Template FieldImpl = Template.Parse("""

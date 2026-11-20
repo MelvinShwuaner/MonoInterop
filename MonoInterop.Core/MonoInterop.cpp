@@ -9,8 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <android/log.h>
-#define LOG(__ARGS__) __android_log_write(ANDROID_LOG_DEBUG, "WBOX TEL AVIV", __ARGS__);
+#include <mono/metadata/debug-helpers.h>
 namespace MonoInterop {
     template<class X> using Generic = typename std::common_type<X>::type;
     template<typename Owner, typename T, typename... Args>
@@ -159,6 +158,9 @@ namespace MonoInterop {
     inline void SetAssemblyPath(const char* path) {
         AsmPath = path;
     }
+    inline void AddInternalCall(const char* sig, const void* method) {
+        mono_add_internal_call(sig, method);
+    }
     inline MonoImage* GetImage(const char* name) {
         static std::unordered_map<std::string, MonoImage*> cache;
         auto it = cache.find(name);
@@ -176,7 +178,10 @@ namespace MonoInterop {
 
     // Non-generic classes: exact lookup via metadata token (emitted by the generator from Cecil)
     inline MonoMethod* MethodByToken(MonoClass* k, uint32_t token) {
-        return mono_get_method(mono_class_get_image(k), token, k);
+        void* iter = nullptr;
+        while (MonoMethod* m = mono_class_get_methods(k, &iter))
+            if (mono_method_get_token(m) == token) return m;
+        throw std::runtime_error(std::format("method not found: {}::{}", mono_class_get_name(k), token));
     }
     // Closed generic classes: by name + argc (overloads need a signature match, see notes)
     inline MonoMethod* FindMethod(MonoClass* k, const char* name, int argc) {
@@ -184,14 +189,10 @@ namespace MonoInterop {
         if (!m) throw std::runtime_error(std::string("method not found: ") + name);
         return m;
     }
-    inline uint32_t GetOffset(MonoClass* k, uint32_t token) {
-        return mono_field_get_offset(mono_class_get_field(k, token));
-    }
 
     inline MonoObject* Invoke(MonoMethod* m, void* self, void** args, bool virt = false) {
         if (virt && self) m = mono_object_get_virtual_method((MonoObject*)self, m);
         MonoObject* exc = nullptr;
-
         MonoObject* r = mono_runtime_invoke(m, self, args, &exc);
         if (exc) throw Exception(exc);
         return r;
@@ -206,14 +207,14 @@ namespace MonoInterop {
         MonoDomain* d = mono_domain_get();
         MonoClass* declaring = mono_method_get_class(open);
         MonoReflectionMethod* info = mono_method_get_object(d, open, declaring);
-        MonoClass* typeCls = mono_class_from_name(mono_get_corlib(), "System", "Type");
+        static MonoClass* typeCls = mono_class_from_name(mono_get_corlib(), "System", "Type");
         MonoArray* arr = mono_array_new(d, typeCls, (uintptr_t)targs.size());
         int i = 0;
         for (MonoClass* a : targs)
             mono_array_setref(arr, i++, mono_type_get_object(d, mono_class_get_type(a)));
         static MonoMethod* mgm = [] {
-            MonoClass* mi = mono_class_from_name(mono_get_corlib(), "System.Reflection", "MethodInfo");
-            MonoMethod* m = mono_class_get_method_from_name(mi, "MakeGenericMethod", 1);
+            static MonoClass* mi = mono_class_from_name(mono_get_corlib(), "System.Reflection", "MethodInfo");
+            static MonoMethod* m = mono_class_get_method_from_name(mi, "MakeGenericMethod", 1);
             if (!m) throw std::runtime_error("MethodInfo.MakeGenericMethod not found");
             return m;
         }();
@@ -226,7 +227,7 @@ namespace MonoInterop {
     // List<> + {int} -> List<int> via Type.MakeGenericType
     inline MonoClass* MakeGenericClass(MonoClass* open, std::initializer_list<MonoClass*> targs) {
         MonoDomain* d = mono_domain_get();
-        MonoClass* typeCls = FindClass("mscorlib", "System", "Type");
+        static MonoClass* typeCls = FindClass("mscorlib.dll", "System", "Type");
         MonoArray* arr = mono_array_new(d, typeCls, (uintptr_t)targs.size());
         int i = 0;
         for (MonoClass* a : targs)
@@ -241,7 +242,6 @@ namespace MonoInterop {
         if (!f) throw std::runtime_error(std::string("field not found!"));
         return f;
     }
-
     template<class T> T GetField(MonoObject* obj, MonoClassField* f) {
         if constexpr (std::is_base_of_v<BaseMonoObject, T>) {
             MonoObject* r = nullptr;
@@ -548,4 +548,7 @@ static_assert(sizeof(Name) == sizeof(Native) && std::is_standard_layout_v<Name>,
     MONO_PRIMITIVE_TYPE(Char, char16_t, mono_get_char_class)
 
     static int StrLen(const MonoInterop::Char* s) { int n = 0; while (s[n]) n++; return n; }
+    template<class T> MonoObject* BoxStruct(T t) {
+        return mono_value_box(mono_domain_get(), MonoTraits<T>::GetClass(), (void*)&t);
+    }
 }

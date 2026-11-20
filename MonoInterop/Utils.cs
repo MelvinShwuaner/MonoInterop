@@ -63,27 +63,7 @@ public static class Utils
             type = mod.ElementType;
         return type;
     }
-    public static string CutNamespace(this string name)
-    {
-        int depth = 0, cut = -1;
-        for (int i = 0; i < name.Length; i++)
-        {
-            char c = name[i];
-            if (c == '<') depth++;
-            else if (c == '>') depth--;
-            else if (c == ':' && depth == 0 && i + 1 < name.Length && name[i + 1] == ':')
-            {
-                cut = i + 1;   // index of the second ':'
-                i++;           // skip the pair
-            }
-        }
-        return cut < 0 ? name : name.Substring(cut + 1);
-    }
-
-    public static string CheckMaps(string Name)
-    {
-        return Constants.AssemblyMaps.GetValueOrDefault(Name, Name.Replace('.', '_')+ "_dll");
-    }
+    
     public static string CheckConflict(this TypeReference t, string ID)
     {
         if (DLLReader.ClassMap.TryGetValue(ID, out Class klass))
