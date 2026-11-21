@@ -80,10 +80,6 @@ public static class Utils
     public static string[] CppID(this TypeReference t) //no modifiers/ generics/ etc
     {
         t = t.RealType();                        // modreq/modopt, from earlier
-        if (t.IsPrimitive())
-        {
-            return [];
-        }
         switch (t)
         {
             case ArrayType at when at.IsVector:       // T[] (rank 1, zero-based)

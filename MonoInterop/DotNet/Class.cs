@@ -206,7 +206,15 @@ public class Class
             klass.Namespace = type.Namespace;
         }
         klass.Name = klass.OriginalName.ToName();
-        klass.FullName = type.CppName();
+        if (type.IsPrimitive())
+        {
+            klass.FullName = "::"+type.FullName.ToCPP();
+        }
+        else
+        {
+            klass.FullName = type.CppName();
+        }
+
         if (ClassMap.TryGetValue(klass.FullName, out Class Orig))
         {
             Orig.Conflict = ConflictOption.Original;

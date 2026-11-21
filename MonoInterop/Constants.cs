@@ -165,6 +165,11 @@ public static class Constants
         {
             return true;
         }
+
+        if (Method.DeclaringType.IsPrimitive() && Method.Name.StartsWith("op"))
+        {
+            return true;
+        }
         return false;
     }
     public static readonly Dictionary<string, string> OperatorMap = new()
