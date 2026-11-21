@@ -1,4 +1,3 @@
-// MonoRuntime.h
 #pragma once
 #include <format>
 #include <mono/metadata/assembly.h>
@@ -10,110 +9,10 @@
 #include <string>
 #include <unordered_map>
 #include <mono/metadata/debug-helpers.h>
+#include <android/log.h>
+#define LOG(...) __android_log_print(ANDROID_LOG_DEBUG, "MonoInterop", __VA_ARGS__);
 namespace MonoInterop {
     template<class X> using Generic = typename std::common_type<X>::type;
-    template<typename Owner, typename T, typename... Args>
-    class Property {
-        std::ptrdiff_t off;
-        T (*getter)(const Owner *, Args...);
-        void (*setter)(Owner *, const T &, Args...);
-
-        Owner *owner() const {
-            return reinterpret_cast<Owner *>(reinterpret_cast<char *>(const_cast<Property *>(this)) - off);
-        }
-
-        // Proxy returned by operator[] / operator() to support both reading and writing
-    public:
-        struct IndexProxy {
-            const Property &prop;
-            std::tuple<Args...> indices;
-
-            operator T() const {
-                return std::apply([&](auto &&... idx) {
-                    return prop.getter(prop.owner(), std::forward<decltype(idx)>(idx)...);
-                }, indices);
-            }
-
-            IndexProxy &operator=(const T &v) {
-                std::apply([&](auto &&... idx) {
-                    prop.setter(prop.owner(), v, std::forward<decltype(idx)>(idx)...);
-                }, indices);
-                return *this;
-            }
-
-            IndexProxy &operator=(const IndexProxy &other) {
-                return *this = static_cast<T>(other);
-            }
-        };
-        Property(Owner *obj, T (*g)(const Owner *, Args...), void (*s)(Owner *, const T &, Args...))
-            : off(reinterpret_cast<char *>(this) - reinterpret_cast<char *>(obj)), getter(g), setter(s) {
-        }
-
-        Property(const Property &) = default;
-
-        IndexProxy operator[](Args... args) const {
-            return IndexProxy{*this, std::make_tuple(std::forward<Args>(args)...)};
-        }
-        IndexProxy operator()(Args... args) const {
-            return IndexProxy{*this, std::make_tuple(std::forward<Args>(args)...)};
-        }
-    };
-
-    // 2. Partial specialization: handles standard properties Property<Owner, T>
-    template<typename Owner, typename T>
-    class Property<Owner, T> {
-        std::ptrdiff_t off;
-
-        T (*getter)(const Owner *);
-
-        void (*setter)(Owner *, const T &);
-
-        Owner *owner() const { return (Owner *) ((char *) this - off); }
-
-    public:
-        Property(Owner *obj, T (*g)(const Owner *), void (*s)(Owner *, const T &))
-            : off((char *) this - (char *) obj), getter(g), setter(s) {
-        }
-
-        Property(const Property &) = default;
-
-        Property &operator=(const T &v) {
-            setter(owner(), v);
-            return *this;
-        }
-
-        Property &operator=(const Property &p) {
-            setter(owner(), (T) p);
-            return *this;
-        }
-
-        operator T() const { return getter(owner()); }
-    };
-    template<typename T>
-    class StaticProperty {
-        T (*getter)();
-
-        void (*setter)(const T &);
-
-    public:
-        StaticProperty(T (*g)(), void (*s)(const T &))
-            : getter(g), setter(s) {
-        }
-
-        StaticProperty(const StaticProperty &) = default;
-
-        StaticProperty &operator=(const T &v) {
-            setter(v);
-            return *this;
-        }
-
-        StaticProperty &operator=(const StaticProperty &p) {
-            setter((T) p);
-            return *this;
-        }
-
-        operator T() const { return getter(); }
-    };
     class BaseMonoObject {
     public:
         static constexpr bool IsStruct = false;
@@ -273,7 +172,6 @@ namespace MonoInterop {
         if constexpr (std::is_base_of_v<BaseMonoObject, T>) mono_field_static_set_value(vt, f, v.GetObject());
         else mono_field_static_set_value(vt, f, (void*)&v);
     }
-
     // How a C++ type maps to the Mono invoke ABI.
     // Primary template = wrapper (reference) types; value types are specialized.
     template<class T> struct MonoTraits {
@@ -291,6 +189,39 @@ namespace MonoInterop {
         static void* ToArg(T* const& v)   { return (void*)&v; }
         static T*    FromMono(MonoObject* o) { return o ? *(T**)mono_object_unbox(o) : nullptr; }
     };
+    template<class T>
+    class Enumerator {
+        BaseMonoObject en;                 // the IEnumerator object (own gchandle)
+        T cur{};
+        bool done = true;
+
+        static MonoClass* IEnumeratorClass() {
+            static MonoClass* k = FindClass("mscorlib.dll", "System.Collections", "IEnumerator");
+            return k;
+        }
+        void Advance() {
+            static MonoMethod* moveNext = FindMethod(IEnumeratorClass(), "MoveNext", 0);
+            static MonoMethod* current  = FindMethod(IEnumeratorClass(), "get_Current", 0);
+            MonoObject* r = Invoke(moveNext, en.GetObject(), nullptr, true);
+            done = !*(bool*)mono_object_unbox(r);
+            if (!done) cur = MonoTraits<T>::FromMono(Invoke(current, en.GetObject(), nullptr, true));
+        }
+    public:
+        Enumerator() = default;                                    // end sentinel
+        explicit Enumerator(MonoObject* e) : en(e), done(false) { Advance(); }
+
+        T operator*() const { return cur; }
+        Enumerator& operator++() { Advance(); return *this; }
+        bool operator!=(const Enumerator& o) const { return done != o.done; }
+        bool operator==(const Enumerator& o) const { return done == o.done; }
+    };
+
+    // Calls IEnumerable.GetEnumerator() on any enumerable object (virtual dispatch)
+    inline MonoObject* GetEnumeratorOf(MonoObject* enumerable) {
+        static MonoMethod* ge = FindMethod(
+            FindClass("mscorlib.dll", "System.Collections", "IEnumerable"), "GetEnumerator", 0);
+        return Invoke(ge, enumerable, nullptr, true);
+    }
     template<class T, int Rank>
     class MArrayND : public BaseMonoObject {
         static_assert(Rank >= 2, "use MArray<T> for rank 1");
@@ -508,6 +439,7 @@ namespace MonoInterop {
         Iter begin() const { return {this, 0}; }
         Iter end() const { return {this, Length()}; }
     };
+
 #define MONO_PRIMITIVE_TYPE(Name, Native, ClassGetter)                                          \
 using Name = Native;                                                                \
 template<> struct MonoTraits<Name> {                                         \
@@ -552,3 +484,61 @@ static_assert(sizeof(Name) == sizeof(Native) && std::is_standard_layout_v<Name>,
         return mono_value_box(mono_domain_get(), MonoTraits<T>::GetClass(), (void*)&t);
     }
 }
+#define MONO_ENUM_TRAITS(image, namespaze, klass, name) \
+template<> struct MonoTraits<klass> { \
+inline static MonoClass* GetClass() { \
+static MonoClass* k = FindClass(image, namespaze, name); \
+return k; \
+} \
+inline static void* ToArg(const klass& v) { return const_cast<klass*>(&v); } \
+inline static klass FromMono(MonoObject* o) { return *(klass*)mono_object_unbox(o); } \
+};
+// 1. Helper macro
+#define CONCAT(a, b) a##b
+#define INCLUDE_IF_true(...) __VA_ARGS__
+#define INCLUDE_IF_false(...)
+#define OPTIONAL_SECTION(cond, ...) CONCAT(INCLUDE_IF_, cond)(__VA_ARGS__)
+#define MI_UNPAREN(...) __VA_ARGS__
+#define MI_VAL(...) std::remove_reference_t<__VA_ARGS__>
+#define MONO_PROPERTY(Self, Name, Set, Get, ...)                                              \
+struct Name##_t {                                                             \
+Self* owner() const {                                                     \
+return reinterpret_cast<Self*>(                                       \
+const_cast<char*>(reinterpret_cast<const char*>(this)) - off());  \
+}                                                                         \
+static std::ptrdiff_t off() { return offsetof(Self, Name); }              \
+OPTIONAL_SECTION(Get,    \
+operator __VA_ARGS__() const;                          \
+) \
+OPTIONAL_SECTION(Set,                                            \
+Name##_t& operator=(__VA_ARGS__ const& v);    \
+)                                                                                \
+} Name;
+
+// Read-only: same without operator=
+// Static property
+#define MONO_STATIC_PROPERTY(Self, Name, Set, Get, ...)                                   \
+struct Name##_t {                                                                    \
+OPTIONAL_SECTION(Get,    \
+operator __VA_ARGS__() const;                          \
+)      \
+OPTIONAL_SECTION(Set,                                                            \
+Name##_t& operator=(__VA_ARGS__ const& v);                                       \
+)                                                                                \
+};                                                                                   \
+inline static Name##_t Name{};
+
+
+
+// call:  MONO_INDEXER(mi_Self, Item, true, (Dict_2<String, Foo>), (Int32, const String&))
+#define MONO_INDEXER(Self, Name, Get, Set, T, Params, Args)                         \
+struct Name##_t {                                                    \
+Self* o;        \
+Self* owner() const {  return o; } \
+MI_UNPAREN Params; \
+OPTIONAL_SECTION(Get,    \
+operator MI_UNPAREN T() const;                                       \
+) \
+OPTIONAL_SECTION(Set, Name##_t& operator=(MI_UNPAREN T const&); )\
+};                                                                       \
+Name##_t operator[](MI_UNPAREN Args);

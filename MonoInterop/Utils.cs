@@ -71,7 +71,8 @@ public static class Utils
             if (klass.Conflict == Class.ConflictOption.Original)
             {
                 TypeDefinition def = t.Resolve();
-                return def.Module.Name.Replace('.', '_') + "::" + ID;
+                if(def.Module.Name != klass.Image)
+                    return def.Module.Name.Replace('.', '_') + "::" + ID;
             }
         }
         return "::"+ID;
@@ -162,8 +163,20 @@ public static class Utils
         return typeRef;
     }
 
-    public static bool IsConsistent(this PropertyDefinition p)
+    public static bool CheckMethod(this PropertyDefinition p, Class Class, out string Name)
     {
+        Name = p.Name.ToCPP(false).CheckSpecialNames();
+        if (Name == Class.Name)
+        {
+            Name = $"_{Name}_";
+        }
+        foreach (var other in Class.Properties) //yes, IL can have two properties of the same name :wbstupid:
+        {
+            if (other.Name == Name)
+            {
+                return false;
+            }
+        }
         if (p.SetMethod != null)
         {
             var set = p.SetMethod;

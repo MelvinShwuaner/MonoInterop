@@ -17,7 +17,8 @@ public class Class
     {
         string pad = new string(' ', indent * 4);
         Utils.AppendTemplate(sb, pad, GenericParameters);
-        sb.Append(pad).AppendLine($"class {Name};");
+        string name = EnumFields == null ? $"class {Name};" : $"enum class {Name} : {ParentClass};";
+        sb.Append(pad).AppendLine(name);
     }
 
     public string Module()
@@ -36,9 +37,33 @@ public class Class
     {
         string pad = new string(' ', indent * 4);
         Utils.AppendTemplate(sb, pad, GenericParameters);
-        sb.Append(pad).Append("class " + Name).Append(" : public ").Append(ParentClass).AppendLine(" {");
-        sb.Append(pad).AppendLine("public:");
+        string name = EnumFields == null ? $"class {Name} : public {ParentClass}" : $"enum class {Name} : {ParentClass}";
+        sb.Append(pad).Append(name).AppendLine(" {");
+        if (EnumFields != null)
+        {
+            foreach (var field in EnumFields)
+            {
+                sb.Append(pad).AppendLine(field);
+            }
+
+            sb.AppendLine($"{pad}}};");
+            return;
+        }
+
+        sb.AppendLine($"using {Constants.ClassSig} = {GetNameWithTemplate()};");
         
+        sb.Append(pad).AppendLine("public:");
+        if (Interfaces != null)
+        {
+            foreach (var face in Interfaces)
+            {
+                sb.Append(pad).AppendLine(Constants.Interface.Render(new
+                {
+                    face = face.Item1
+                }));
+            }
+        }
+
         sb.Append(pad).AppendLine(Constants.InitMethod.Render(new
         {
             image = Image,
@@ -62,7 +87,7 @@ public class Class
         sb.AppendLine(Constants.PropertyDef.Render(new
         {
             props = Properties,
-            self = GetNameWithTemplate(),
+            self = Constants.ClassSig,
             IsGeneric = GenericParameters.Count > 0,
             pad
         }));
@@ -71,7 +96,7 @@ public class Class
             sb.AppendLine(Constants.FieldDef.Render(new
             {
                 p,
-                self = GetNameWithTemplate(),
+                self = Constants.ClassSig,
                 pad
             }));
         }
@@ -104,7 +129,17 @@ public class Class
         }
         return name;
     }
-    public void WriteDefinitions(StringBuilder sb, int i, string idk)
+
+    public void WriteMacros(StringBuilder sb)
+    {
+        if (EnumFields != null)
+        {
+            sb.AppendLine($"""
+                           {Constants.ENUMTRAIT}("{Image}", "{Namespace}", {FullName}, "{OriginalName}")
+                           """);
+        }
+    }
+    public void WriteDefinitions(StringBuilder sb, int i)
     {
         string pad = new string(' ', i * 4);
         string cls = GetNameWithTemplate();
@@ -152,20 +187,14 @@ public class Class
     public List<string> GenericParameters = new();
     public bool IsRoot = false;
     public ConflictOption Conflict;
+    public List<string>? EnumFields;
+    public List<(string, string)>? Interfaces;
     public static List<Class> FromType(TypeDefinition type,bool IsRoot, Class? Declaring = null)
     {
         List<Class> List = new();
         Class klass = new Class();
         klass.Image = type.Module.Name;
         klass.IsRoot = IsRoot;
-        if (type.HasGenericParameters)
-        {
-            foreach (var param in type.GenericParameters)
-            {
-                klass.GenericParameters.Add(param.FullName);
-            }
-        }
-
         if (Declaring != null)
         {
             klass.OriginalName = Declaring.OriginalName + "+" + type.Name;
@@ -178,6 +207,51 @@ public class Class
         }
         klass.Name = klass.OriginalName.ToName();
         klass.FullName = type.CppName();
+        if (ClassMap.TryGetValue(klass.FullName, out Class Orig))
+        {
+            Orig.Conflict = ConflictOption.Original;
+            klass.Conflict = ConflictOption.Secondary;
+            klass.FullName = klass.Module() + klass.FullName;
+        }
+        List.Add(klass);
+        ClassMap.Add(klass.FullName, klass);
+        if (type.IsEnum)
+        {
+            klass.EnumFields = new();
+            foreach (var field in type.Fields)
+            {
+                if (field.Name == "value__")
+                {
+                    klass.ParentClass = field.FieldType.CppName();
+                }
+                else
+                {
+                    klass.EnumFields.Add($"{field.Name.CheckSpecialNames()} = {field.Constant},");
+                }
+            }
+            return List;
+        }
+        if (type.HasInterfaces)
+        {
+            klass.Interfaces = new();
+            foreach (var face in type.Interfaces)
+            {
+                string name = face.InterfaceType.CppName();
+                string id = face.InterfaceType.StripGenericArguments().CppName();
+                klass.Interfaces.Add((name, id));
+                foreach (var referenced in face.InterfaceType.CppID())
+                {
+                    klass.ReferencedClasses.Add(referenced);
+                }
+            }
+        }
+        if (type.HasGenericParameters)
+        {
+            foreach (var param in type.GenericParameters)
+            {
+                klass.GenericParameters.Add(param.FullName);
+            }
+        }
         if (type.BaseType == null)
         {
             klass.ParentClass = Constants.RootClass;
@@ -203,14 +277,6 @@ public class Class
                 klass.NestedClasses.Add(Nested[0]);
             List.AddRange(Nested);
         }
-        if (ClassMap.TryGetValue(klass.FullName, out Class Orig))
-        {
-            Orig.Conflict = ConflictOption.Original;
-            klass.Conflict = ConflictOption.Secondary;
-            klass.FullName = klass.Module() + "::" + klass.FullName;
-        }
-        List.Add(klass);
-        ClassMap.Add(klass.FullName, klass);
         foreach (var method in type.Methods)
         {
             if (Constants.CutMethod(method))
@@ -230,12 +296,17 @@ public class Class
             {
                 continue;
             }
-            if (!property.IsConsistent())
+            if (!property.CheckMethod(klass, out string Name))
             {
-                //Console.WriteLine($"Warning: property {property.FullName} is not consistent! skipping!");
+                Console.WriteLine($"Warning: property {property.FullName} is not consistent! skipping!");
                 continue;
             }
-            klass.Properties.Add(new Property(property, klass));
+            if (property.Name.IsExplicitImpl() && property.isPrivateProperty() && property.HasParameters)
+            {
+                Console.WriteLine($"Warning: property {property.FullName} is a hidden indexer, which isn't supported. skipping!");
+                continue;
+            }
+            klass.Properties.Add(new Property(property, klass, Name));
         }
         foreach (var field in type.Fields)
         {

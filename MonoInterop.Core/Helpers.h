@@ -31,3 +31,19 @@ namespace System {
         PRIMITIVE(MonoInterop::Char)
     };
 }
+namespace System::Collections {
+    class IEnumerable {
+        MonoInterop::Enumerator<::System::Object> begin() const {
+            return MonoInterop::Enumerator<::System::Object>(MonoInterop::GetEnumeratorOf(this->GetObject()));
+        }
+        MonoInterop::Enumerator<::System::Object> end() const { return {}; }
+    };
+}
+namespace System::Collections::Generic {
+    class IEnumerable_1 {
+        MonoInterop::Enumerator<T> begin() const {
+            return MonoInterop::Enumerator<T>(MonoInterop::GetEnumeratorOf(this->GetObject()));
+        }
+        MonoInterop::Enumerator<T> end() const { return {}; }
+    };
+}

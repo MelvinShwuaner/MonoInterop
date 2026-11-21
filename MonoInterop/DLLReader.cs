@@ -68,11 +68,18 @@ public class DLLReader
         sb.AppendLine("// ---- class definitions ----");
         EmitByNamespace(sb, sorted, (c, i) => c.WriteBody(sb, i));
         
+        sb.AppendLine("// ---- macros ----");
+        sb.AppendLine("namespace MonoInterop {");
+        foreach (var c in sorted)
+        {
+            c.WriteMacros(sb);
+        }
+        sb.AppendLine("}");
+        
         Console.WriteLine("writing method definitions ");
         // Phase 3: method bodies, any order
         sb.AppendLine("// ---- definitions ----");
-        EmitByNamespace(sb, Classes, (c, i) => c.WriteDefinitions(sb, i, ""));
-
+        EmitByNamespace(sb, Classes, (c, i) => c.WriteDefinitions(sb, i));
         return sb.ToString();
     }
     /*public static IEnumerable<DLLInfo> ReadDLLs(DirectoryInfo dir)

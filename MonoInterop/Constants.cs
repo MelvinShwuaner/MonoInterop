@@ -16,10 +16,14 @@ public static class Constants
                                          */
                                          
                                          """;
-    public const string StaticOffset = "static uint32_t ";
-    public const string StaticInit = "static MonoClass* Class; ";
+    public const string ENUMTRAIT = "MONO_ENUM_TRAITS";
+    public static readonly Template Interface = Template.Parse("""
+                                                               inline operator {{face}}() const {
+                                                                return {{face}}(this->GetObject());
+                                                               }
+                                                               """);
     public static readonly Template InitMethod = Template.Parse("""
-                                                                {{pad}}static MonoClass* ClassInit() {
+                                                                {{pad}}inline static MonoClass* ClassInit() {
                                                                 {{pad}}    static MonoClass* Class = {{ if generic_parameters.size > 0 }}MonoInterop::MakeGenericClass(MonoInterop::FindClass("{{image}}", "{{namespaze}}", "{{klass}}"), { {{ for g in generic_parameters }}MonoInterop::MonoTraits<{{ g }}>::GetClass(){{ if !for.last }}, {{ end }}{{ end }} }){{ else }}MonoInterop::FindClass("{{image}}", "{{namespaze}}", "{{klass}}"){{ end }};
                                                                 {{pad}}    return Class;
                                                                 {{pad}}}
@@ -44,17 +48,14 @@ public static class Constants
                                                                           }
                                                                           """);
     public static Template Constructor = Template.Parse("""
-                                                        {{name}}(MonoObject* obj) : {{parent_class}}(obj) {}
+                                                        inline {{name}}(MonoObject* obj) : {{parent_class}}(obj) {}
                                                         """);
 
-    public static string SetStruct = "static constexpr bool IsStruct = true;";
+    public const string ClassSig = "_sig";
     public static Template PropertyDef = Template.Parse("""
                                                         {{- for p in props ~}}
-                                                        {{ if p.getter != "" }}{{ pad }}static {{ p.type }} _pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{p.args_add}}{{end}}); 
-                                                        {{ end }}{{ if p.setter != "" }}{{ pad }}static void _pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v{{p.args_add}}); 
-                                                        {{ end }}
-                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}{{p.parameters_add}}>{{else}}inline static MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}{{ if p.getter != "" }}&{{ self }}::_pget_{{ p.name }}{{ else }}nullptr{{ end }}, {{ if p.setter != "" }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
-                                                        {{ if p.is_indexer }}{{ pad }}{{ if is_generic }}typename {{ end }}decltype({{ p.name }})::IndexProxy operator[]({{p.args}}); 
+                                                        {{ if p.is_indexer}}{{pad}}MONO_INDEXER({{ self }}, {{p.name}}, {{p.getter != ""}}, {{p.setter != ""}}, ({{p.type}}), ({{p.params}}), ({{p.args}})){{else}}
+                                                        {{ pad }}{{if !p.is_static}}MONO_PROPERTY{{else}}MONO_STATIC_PROPERTY{{end}}({{ self }}, {{p.name}}, {{p.setter != ""}}, {{p.getter != ""}}, {{ p.type }})
                                                         {{ end }}
                                                         {{- end ~}}
                                                         """);
@@ -62,44 +63,43 @@ public static class Constants
                                                          {{- for p in props ~}}
                                                          {{ if p.getter != "" ~}}
                                                          {{ cls_template }}
-                                                         inline {{ p.type }} {{ self }}::_pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{end}}{{p.args_add}}) { return {{if !p.is_static}}o->{{end}}{{ p.getter }}({{p.param_names}}); } 
+                                                         inline {{ self }}::{{ p.name }}_t::operator {{ p.type }}() const { 
+                                                         return {{if !p.is_static}}owner()->{{end}}{{p.getter}}({{p.param_names}}); }
                                                          {{ end ~}}
                                                          {{ if p.setter != "" ~}}
                                                          {{ cls_template }}
-                                                         inline void {{ self }}::_pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v{{p.args_add}}) { {{if !p.is_static}}o->{{end}}{{ p.setter }}({{p.param_names_add}}v); } 
+                                                         inline {{ self }}::{{ p.name }}_t& {{ self }}::{{ p.name }}_t::operator=({{ p.type }} const& v) {
+                                                         {{if !p.is_static}}owner()->{{end}}{{p.setter}}({{p.param_names_add}}v); }
                                                          {{ end ~}}
                                                          {{ if p.is_indexer ~}}
                                                          {{ cls_template }}
-                                                         inline {{ if is_generic }}typename {{ end }}decltype({{ self }}::{{ p.name }})::IndexProxy {{ self }}::operator[]({{p.args}}) {
-                                                             return this->{{ p.name }}[{{p.param_names}}];
+                                                         inline {{ if is_generic }}typename {{ end }}{{ self }}::{{ p.name }}_t {{ self }}::operator[]({{ p.args }}) {
+                                                             return {{ p.name }}_t{ this,{{ p.param_names }} };
                                                          }
                                                          {{ end ~}}
                                                          {{- end -}}
                                                          """);
     public static Template FieldDef = Template.Parse("""
-                                                        {{ pad }}static {{ p.type }} _pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{end}}); 
-                                                        {{ if !p.read_only}}{{ pad }}static void _pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v); 
-                                                        {{ pad }}{{if !p.is_static}}MonoInterop::Property<{{ self }}, {{ p.type }}>{{else}}inline static MonoInterop::StaticProperty<{{ p.type }}>{{end}} {{ p.name }}{ {{if !p.is_static}}this, {{end}}&{{ self }}::_pget_{{ p.name }}, {{ if !p.read_only }}&{{ self }}::_pset_{{ p.name }}{{ else }}nullptr{{ end }} };
-                                                        {{ end }}
+                                                        {{ pad }}{{if !p.is_static}}MONO_PROPERTY{{else}}MONO_STATIC_PROPERTY{{end}}({{ self }}, {{p.name}}, {{!p.read_only}}, true, {{ p.type }});
                                                         """);
     public static Template FieldImpl = Template.Parse("""
                                                          {{ cls_template }}
-                                                         inline {{ p.type }} {{ self }}::_pget_{{ p.name }}({{if !p.is_static}}const {{ self }}* o{{end}}) { 
+                                                         inline {{ self }}::{{ p.name }}_t::operator {{ p.type }}() const { 
                                                             static MonoClassField* Field = MonoInterop::FindField({{self}}::ClassInit(), {{p.token}});
                                                             {{if p.is_static}}
                                                             return MonoInterop::GetStatic<{{p.type}}>({{self}}::ClassInit(), Field);
                                                             {{else}}
-                                                            return MonoInterop::GetField<{{p.type}}>(o->GetObject(), Field);
+                                                            return MonoInterop::GetField<{{p.type}}>(this->owner()->GetObject(), Field);
                                                             {{end}}
                                                          } 
                                                          {{ if !p.read_only}}
                                                          {{ cls_template }}
-                                                         inline void {{ self }}::_pset_{{ p.name }}({{if !p.is_static}}{{ self }}* o, {{end}}{{ p.type }} const& v) { 
+                                                         inline {{ self }}::{{ p.name }}_t& {{ self }}::{{ p.name }}_t::operator=({{ p.type }} const& v) { 
                                                            static MonoClassField* Field = MonoInterop::FindField({{self}}::ClassInit(), {{p.token}});
                                                            {{if p.is_static}}
-                                                           return MonoInterop::SetStatic<{{p.type}}>({{self}}::ClassInit(), Field, v);
+                                                           MonoInterop::SetStatic<{{p.type}}>({{self}}::ClassInit(), Field, v);
                                                            {{else}}
-                                                           return MonoInterop::SetField<{{p.type}}>(o->GetObject(), Field, v);
+                                                           MonoInterop::SetField<{{p.type}}>(this->owner()->GetObject(), Field, v);
                                                            {{end}}
                                                          } 
                                                          {{ end ~}}
@@ -155,7 +155,8 @@ public static class Constants
         "delete",
         "and",
         "auto",
-        "new"
+        "new",
+        ClassSig
     };//no name can have a name like these
 
     public static bool CutMethod(MethodDefinition Method) //global method cutter

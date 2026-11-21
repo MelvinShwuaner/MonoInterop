@@ -13,3 +13,4 @@ CMakeUserPresets.json
 /.idea
 /MonoInterop/bin
 /MonoInterop/obj
+/MonoInterop.Core/.idea

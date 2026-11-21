@@ -7,35 +7,32 @@ public class Sorter
     static readonly IEqualityComparer<Class> RefCmp =
         (IEqualityComparer<Class>)ReferenceEqualityComparer.Instance;
 
-    public static List<Class> SortClasses(List<Class> topLevel)
+    public static Class? GetClass(string fullname)
     {
-
-        return SortSiblings(topLevel);
-    }
-
-    public static Class GetClass(string fullname)
-    {
-        if (DLLReader.ClassMap.TryGetValue(fullname, out var c))
-        {
-            return c;
-        }
-
-        return null;
+        return DLLReader.ClassMap.GetValueOrDefault(fullname);
     }
 // Sorts one sibling list (top-level, or one class's NestedClasses), then recurses into each.
-    static List<Class> SortSiblings(List<Class> siblings)
+    public static  List<Class> SortClasses(List<Class> classes)
     {
         var deps = new Dictionary<Class, List<Class>>(RefCmp);
-        foreach (var c in siblings)
+        foreach (var c in classes)
         {
             var list = new List<Class>();
             if (c.ParentID != null)
             {
                 var parent = GetClass(c.ParentID);
-                if (parent != null && !ReferenceEquals(parent, c) && !list.Contains(parent, RefCmp))
+                if (parent != null && !list.Contains(parent, RefCmp))
                     list.Add(parent);
             }
-
+            if (c.Interfaces != null)
+            {
+                foreach (var face in c.Interfaces)
+                {
+                    var parent = GetClass(face.Item2);
+                    if (parent != null && !list.Contains(parent, RefCmp))
+                        list.Add(parent);
+                }
+            }
             deps[c] = list;
         }
 
@@ -56,7 +53,7 @@ public class Sorter
             result.Add(c);
         }
 
-        foreach (var c in siblings) Visit(c);
+        foreach (var c in classes) Visit(c);
         
 
         return result;
